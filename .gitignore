@@ -1,0 +1,31 @@
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Streamlit local configuration
+.streamlit/secrets.toml
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# OS / temporary files
+*.tmp
+*.log
+
+# Checkpoint weights
+# (Keep weights ignored if you are hosting them via GitHub Releases or HF Hub.
+# If using Git LFS, uncomment the line below or remove it so LFS can track them.)
+# weights/*.pth
