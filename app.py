@@ -17,6 +17,8 @@ from degrade import (
     apply_brightness_darkening,
     pad_to_square,
 )
+from cam import GradCAM, overlay_cam_on_image, get_target_layer
+
 
 # -----------------------------------------------------------------------------
 # Streamlit Page Configuration
@@ -366,6 +368,12 @@ pad_to_square_toggle = st.sidebar.checkbox(
     value=False,
     help="Center non-square images with white padding (255, 255, 255) prior to resizing to 224x224",
 )
+show_cam = st.sidebar.checkbox(
+    "Show Grad-CAM Heatmap",
+    value=False,
+    help="Superimpose class activation heatmaps to highlight visual focus regions",
+)
+
 
 # 4. Perturbation Settings & Degradation Families
 st.sidebar.markdown("---")
@@ -540,6 +548,21 @@ if model_choice != "Compare All Three":
     clean_res = run_inference(model, device, clean_image_pil, model_name=model_choice)
     degraded_res = run_inference(model, device, degraded_image_pil, model_name=model_choice)
 
+    # Optional Grad-CAM overlays (computed strictly outside the timed inference pass)
+    clean_cam_overlay: Optional[Image.Image] = None
+    degraded_cam_overlay: Optional[Image.Image] = None
+    if show_cam:
+        target_layer = get_target_layer(model, selected_cfg["arch"])
+        cam_generator = GradCAM(model, target_layer)
+
+        clean_tensor = eval_transform(clean_image_pil).unsqueeze(0).to(device)
+        clean_cam_map = cam_generator.generate_cam(clean_tensor, target_class_idx=clean_res["top_idx"])
+        clean_cam_overlay = overlay_cam_on_image(clean_image_pil, clean_cam_map, alpha=0.5)
+
+        deg_tensor = eval_transform(degraded_image_pil).unsqueeze(0).to(device)
+        deg_cam_map = cam_generator.generate_cam(deg_tensor, target_class_idx=degraded_res["top_idx"])
+        degraded_cam_overlay = overlay_cam_on_image(degraded_image_pil, deg_cam_map, alpha=0.5)
+
     st.subheader(f"🔍 Model Evaluation: {model_choice}")
     st.caption(
         f"Complexity: **{selected_cfg['params']}** Parameters | **{selected_cfg['gflops']}** | "
@@ -551,6 +574,8 @@ if model_choice != "Compare All Three":
     with col_orig:
         st.markdown("### 📷 Original (Clean) Input")
         render_image(clean_image_pil, caption=f"Size: {clean_image_pil.size[0]}x{clean_image_pil.size[1]}")
+        if show_cam and clean_cam_overlay is not None:
+            render_image(clean_cam_overlay, caption="Grad-CAM Attention Map")
         render_prediction_badge(
             top_class=clean_res["top_class"],
             top_prob=clean_res["top_prob"],
@@ -580,6 +605,8 @@ if model_choice != "Compare All Three":
         caption_text = f"Degradations: {', '.join(degradation_desc)}" if degradation_desc else "No degradations applied (Clean)"
 
         render_image(degraded_image_pil, caption=caption_text)
+        if show_cam and degraded_cam_overlay is not None:
+            render_image(degraded_cam_overlay, caption="Grad-CAM Attention Map")
         render_prediction_badge(
             top_class=degraded_res["top_class"],
             top_prob=degraded_res["top_prob"],
@@ -664,11 +691,21 @@ else:
         m, dev = get_model(cfg["arch"], cfg["ckpt_path"])
         clean_out = run_inference(m, dev, clean_image_pil, model_name=name)
         deg_out = run_inference(m, dev, degraded_image_pil, model_name=name)
+
+        cam_overlay: Optional[Image.Image] = None
+        if show_cam:
+            target_layer = get_target_layer(m, cfg["arch"])
+            cam_gen = GradCAM(m, target_layer)
+            deg_tensor = eval_transform(degraded_image_pil).unsqueeze(0).to(dev)
+            cam_map = cam_gen.generate_cam(deg_tensor, target_class_idx=deg_out["top_idx"])
+            cam_overlay = overlay_cam_on_image(degraded_image_pil, cam_map, alpha=0.5)
+
         results[name] = {
             "clean": clean_out,
             "degraded": deg_out,
             "cfg": cfg,
             "device": dev,
+            "cam_overlay": cam_overlay,
         }
 
     # Render results in 3 columns
@@ -691,6 +728,9 @@ else:
                 """,
                 unsafe_allow_html=True,
             )
+
+            if show_cam and res.get("cam_overlay") is not None:
+                render_image(res["cam_overlay"], caption="Grad-CAM Attention Map")
 
             # Top prediction badge on degraded image
             render_prediction_badge(
