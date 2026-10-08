@@ -28,17 +28,17 @@ def check_all_checkpoints() -> bool:
         print(f"  Checkpoint Path : {path}")
 
         if not os.path.isfile(path):
-            print(f"  ❌ Status: File not found at '{path}'")
+            print(f"  [ERROR] Status: File not found at '{path}'")
             all_passed = False
             continue
 
         try:
             model = load_weights(arch=arch, ckpt_path=path, device="cpu")
             param_count = sum(p.numel() for p in model.parameters()) / 1e6
-            print(f"  ✅ Status: Loaded successfully with strict=True!")
+            print(f"  [PASS] Status: Loaded successfully with strict=True!")
             print(f"  Parameters: {param_count:.2f} M (expected ~{expected_params:.2f} M)")
         except Exception as e:
-            print(f"  ❌ Status: Checkpoint loading failed: {e}")
+            print(f"  [ERROR] Status: Checkpoint loading failed: {e}")
             all_passed = False
 
     print("\n" + "=" * 68)

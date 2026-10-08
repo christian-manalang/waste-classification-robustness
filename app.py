@@ -25,7 +25,6 @@ from cam import GradCAM, overlay_cam_on_image, get_target_layer
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="Visual Degradation Robustness in Waste Classification",
-    page_icon="♻️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -66,15 +65,6 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "badge_color": "#059669",
         "tag": "Standard Residual Network",
     },
-}
-
-CLASS_ICONS = {
-    "cardboard": "📦",
-    "glass": "🍾",
-    "metal": "🥫",
-    "paper": "📄",
-    "plastic": "🧴",
-    "trash": "🗑️",
 }
 
 
@@ -148,26 +138,24 @@ def render_prediction_badge(
     baseline_class: Optional[str] = None,
 ) -> None:
     """
-    Render high-contrast styled top prediction badge with class icon and confidence.
+    Render high-contrast styled top prediction badge with class name and confidence.
     """
     pct = top_prob * 100.0
-    icon = CLASS_ICONS.get(top_class, "🏷️")
 
     if is_degraded and baseline_class is not None and top_class != baseline_class:
-        base_icon = CLASS_ICONS.get(baseline_class, "🏷️")
         st.markdown(
             f"""
             <div style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
                         color: white; padding: 12px 16px; border-radius: 8px; margin: 10px 0;
                         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
                 <div style="font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">
-                    ⚠️ Prediction Shifted Under Degradation
+                    Prediction Shifted Under Degradation
                 </div>
                 <div style="font-size: 1.35rem; font-weight: 700; margin-top: 2px;">
-                    {icon} {top_class.upper()} ({pct:.1f}%)
+                    {top_class.upper()} ({pct:.1f}%)
                 </div>
                 <div style="font-size: 0.85rem; opacity: 0.92; margin-top: 4px;">
-                    Baseline clean was: <b>{base_icon} {baseline_class.upper()}</b>
+                    Baseline clean was: <b>{baseline_class.upper()}</b>
                 </div>
             </div>
             """,
@@ -189,7 +177,7 @@ def render_prediction_badge(
                     {subtitle}
                 </div>
                 <div style="font-size: 1.35rem; font-weight: 700; margin-top: 2px;">
-                    {icon} {top_class.upper()} ({pct:.1f}%)
+                    {top_class.upper()} ({pct:.1f}%)
                 </div>
             </div>
             """,
@@ -204,7 +192,6 @@ def render_probability_bars(probs: np.ndarray, top_idx: int) -> None:
     for idx, cls_name in enumerate(CLASSES):
         prob = float(probs[idx])
         pct = prob * 100.0
-        icon = CLASS_ICONS.get(cls_name, "🏷️")
         is_top = (idx == top_idx)
 
         weight = "700" if is_top else "400"
@@ -214,7 +201,7 @@ def render_probability_bars(probs: np.ndarray, top_idx: int) -> None:
             f"""
             <div style="display: flex; justify-content: space-between; align-items: center;
                         margin-bottom: 2px; font-weight: {weight}; color: {color};">
-                <span>{icon} {cls_name.capitalize()}</span>
+                <span>{cls_name.capitalize()}</span>
                 <span style="font-family: monospace;">{pct:.1f}%</span>
             </div>
             """,
@@ -235,7 +222,7 @@ st.markdown(
 # -----------------------------------------------------------------------------
 # Static Complexity Badges
 # -----------------------------------------------------------------------------
-st.markdown("#### 📐 Architecture Complexity Benchmarks")
+st.markdown("#### Architecture Complexity Benchmarks")
 badge_col1, badge_col2, badge_col3 = st.columns(3)
 
 with badge_col1:
@@ -294,7 +281,7 @@ st.markdown("<hr style='margin: 18px 0;'>", unsafe_allow_html=True)
 # -----------------------------------------------------------------------------
 # Sidebar: Controls & Degradation Configuration
 # -----------------------------------------------------------------------------
-st.sidebar.header("⚙️ Experiment Controls")
+st.sidebar.header("Experiment Controls")
 
 # 1. Model Selection
 model_choice = st.sidebar.selectbox(
@@ -307,7 +294,7 @@ model_choice = st.sidebar.selectbox(
 st.sidebar.markdown("---")
 
 # 2. Image Source
-st.sidebar.subheader("📷 Image Input")
+st.sidebar.subheader("Image Input")
 image_source = st.sidebar.radio(
     "Input Method",
     options=["Upload Image", "Use Demo Sample"],
@@ -328,7 +315,7 @@ if image_source == "Upload Image":
         except Exception as e:
             st.sidebar.error(f"Failed to load uploaded image: {e}")
     else:
-        st.sidebar.info("💡 Upload an image or switch to 'Use Demo Sample' to test.")
+        st.sidebar.info("Upload an image or switch to 'Use Demo Sample' to test.")
 else:
     sample_patterns = ["samples/*.jpg", "samples/*.jpeg", "samples/*.png", "samples/*.JPG", "samples/*.PNG"]
     sample_files = []
@@ -362,7 +349,7 @@ if raw_image is not None:
 
 # 3. Preprocessing Toggle (Default: False)
 st.sidebar.markdown("---")
-st.sidebar.subheader("📐 Preprocessing")
+st.sidebar.subheader("Preprocessing")
 pad_to_square_toggle = st.sidebar.checkbox(
     "Pad to Square (1:1 Aspect Ratio)",
     value=False,
@@ -377,7 +364,7 @@ show_cam = st.sidebar.checkbox(
 
 # 4. Perturbation Settings & Degradation Families
 st.sidebar.markdown("---")
-st.sidebar.subheader("🧪 Visual Degradation Settings")
+st.sidebar.subheader("Visual Degradation Settings")
 
 degradation_family = st.sidebar.selectbox(
     "Degradation Family",
@@ -463,7 +450,7 @@ occlusion_val = st.sidebar.slider(
 if st.sidebar.button("Re-roll box", use_container_width=True, help="Regenerate random seed and re-trigger occlusion placement"):
     st.session_state.occlusion_seed = random.randint(1, 1_000_000)
 
-st.sidebar.caption(f"🎲 Occlusion Seed: `{st.session_state.occlusion_seed}`")
+st.sidebar.caption(f"Occlusion Seed: `{st.session_state.occlusion_seed}`")
 
 brightness_alpha = st.sidebar.slider(
     "Brightness Darkening (α)",
@@ -482,7 +469,7 @@ if model_choice != "Compare All Three":
     active_ckpt = MODEL_CONFIGS[model_choice]["ckpt_path"]
     if not os.path.isfile(active_ckpt):
         st.error(
-            f"❌ **Missing Weight File**: Checkpoint file for **{model_choice}** was not found at `{active_ckpt}`. "
+            f"**Missing Weight File**: Checkpoint file for **{model_choice}** was not found at `{active_ckpt}`. "
             "Execution halted. Please place the required `.pth` checkpoint in the `weights/` directory."
         )
         st.stop()
@@ -494,7 +481,7 @@ else:
     ]
     if missing_ckpts:
         st.error(
-            f"❌ **Missing Weight File(s)**: Checkpoint(s) missing for comparison mode: {', '.join(missing_ckpts)}. "
+            f"**Missing Weight File(s)**: Checkpoint(s) missing for comparison mode: {', '.join(missing_ckpts)}. "
             "Execution halted. Please place all required `.pth` checkpoints in the `weights/` directory."
         )
         st.stop()
@@ -503,11 +490,11 @@ else:
 # Image Degradation Pipeline
 # -----------------------------------------------------------------------------
 if raw_image is None:
-    st.info("👋 Please upload an image from the sidebar or select a Demo Sample to begin analysis.")
+    st.info("Please upload an image from the sidebar or select a Demo Sample to begin analysis.")
     st.stop()
 
 if was_downscaled:
-    st.info("ℹ️ Image downscaled to 512 px (long side) so degradation strength matches the thesis test set.")
+    st.info("Image downscaled to 512 px (long side) so degradation strength matches the thesis test set.")
 
 # Apply pad-to-square if enabled
 if pad_to_square_toggle:
@@ -563,7 +550,7 @@ if model_choice != "Compare All Three":
         deg_cam_map = cam_generator.generate_cam(deg_tensor, target_class_idx=degraded_res["top_idx"])
         degraded_cam_overlay = overlay_cam_on_image(degraded_image_pil, deg_cam_map, alpha=0.5)
 
-    st.subheader(f"🔍 Model Evaluation: {model_choice}")
+    st.subheader(f"Model Evaluation: {model_choice}")
     st.caption(
         f"Complexity: **{selected_cfg['params']}** Parameters | **{selected_cfg['gflops']}** | "
         f"Device: `{device.type.upper()}` | Checkpoint: `{selected_cfg['ckpt_path']}`"
@@ -572,7 +559,7 @@ if model_choice != "Compare All Three":
     col_orig, col_deg = st.columns(2)
 
     with col_orig:
-        st.markdown("### 📷 Original (Clean) Input")
+        st.markdown("### Original (Clean) Input")
         render_image(clean_image_pil, caption=f"Size: {clean_image_pil.size[0]}x{clean_image_pil.size[1]}")
         if show_cam and clean_cam_overlay is not None:
             render_image(clean_cam_overlay, caption="Grad-CAM Attention Map")
@@ -585,7 +572,7 @@ if model_choice != "Compare All Three":
             f"""
             <div style="background-color: rgba(100, 116, 139, 0.12); padding: 6px 12px;
                         border-radius: 6px; display: inline-block; margin-bottom: 12px; font-size: 0.92rem;">
-                ⚡ <b>Forward Latency:</b> <code>{clean_res['latency_ms']:.2f} ms</code>
+                <b>Forward Latency:</b> <code>{clean_res['latency_ms']:.2f} ms</code>
             </div>
             """,
             unsafe_allow_html=True,
@@ -594,7 +581,7 @@ if model_choice != "Compare All Three":
         render_probability_bars(clean_res["probs"], clean_res["top_idx"])
 
     with col_deg:
-        st.markdown("### 🧪 Degraded Input")
+        st.markdown("### Degraded Input")
         degradation_desc = []
         if blur_val > 0.0:
             degradation_desc.append(f"Blur σ={blur_val:.1f}")
@@ -617,7 +604,7 @@ if model_choice != "Compare All Three":
             f"""
             <div style="background-color: rgba(100, 116, 139, 0.12); padding: 6px 12px;
                         border-radius: 6px; display: inline-block; margin-bottom: 12px; font-size: 0.92rem;">
-                ⚡ <b>Forward Latency:</b> <code>{degraded_res['latency_ms']:.2f} ms</code>
+                <b>Forward Latency:</b> <code>{degraded_res['latency_ms']:.2f} ms</code>
             </div>
             """,
             unsafe_allow_html=True,
@@ -627,7 +614,7 @@ if model_choice != "Compare All Three":
 
     # Degradation Impact Summary
     st.markdown("---")
-    st.markdown("#### 📈 Degradation Impact Summary")
+    st.markdown("#### Degradation Impact Summary")
     conf_delta = (degraded_res["top_prob"] - clean_res["top_prob"]) * 100.0
     is_preserved = clean_res["top_class"] == degraded_res["top_class"]
 
@@ -658,18 +645,18 @@ else:
     # -------------------------------------------------------------------------
     # Mode B: "Compare All Three" Models Mode
     # -------------------------------------------------------------------------
-    st.subheader("📊 Cross-Architecture Robustness Comparison")
+    st.subheader("Cross-Architecture Robustness Comparison")
 
     # Display original and degraded images side by side
-    st.markdown("#### 🖼️ Visual Input Comparison")
+    st.markdown("#### Visual Input Comparison")
     img_col1, img_col2 = st.columns(2)
 
     with img_col1:
-        st.markdown("##### 📷 Original (Clean) Image")
+        st.markdown("##### Original (Clean) Image")
         render_image(clean_image_pil, caption=f"Size: {clean_image_pil.size[0]}x{clean_image_pil.size[1]}")
 
     with img_col2:
-        st.markdown("##### 🧪 Degraded Image")
+        st.markdown("##### Degraded Image")
         deg_labels = []
         if blur_val > 0.0:
             deg_labels.append(f"Blur σ={blur_val:.1f}")
@@ -683,7 +670,7 @@ else:
         )
 
     st.markdown("---")
-    st.markdown("#### 🤖 Model Inference & Robustness Metrics")
+    st.markdown("#### Model Inference & Robustness Metrics")
 
     # Evaluate all three architectures
     results: Dict[str, Dict[str, Any]] = {}
@@ -744,7 +731,7 @@ else:
                 f"""
                 <div style="background-color: rgba(100, 116, 139, 0.12); padding: 5px 10px;
                             border-radius: 6px; display: inline-block; margin-bottom: 10px; font-size: 0.9rem;">
-                    ⚡ <b>Latency:</b> <code>{deg_out['latency_ms']:.2f} ms</code>
+                    <b>Latency:</b> <code>{deg_out['latency_ms']:.2f} ms</code>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -755,7 +742,7 @@ else:
 
     # Side-by-side Summary Table
     st.markdown("---")
-    st.markdown("#### 📋 Comparative Summary Table")
+    st.markdown("#### Comparative Summary Table")
 
     summary_rows = []
     for arch_name, res in results.items():
@@ -763,7 +750,7 @@ else:
         deg_out = res["degraded"]
         cfg = res["cfg"]
         is_same = clean_out["top_class"] == deg_out["top_class"]
-        status_str = "✅ Retained" if is_same else f"❌ Shifted to {deg_out['top_class']}"
+        status_str = "Retained" if is_same else f"Shifted to {deg_out['top_class']}"
         conf_drop = (clean_out["top_prob"] - deg_out["top_prob"]) * 100.0
 
         summary_rows.append(
@@ -787,9 +774,8 @@ else:
 st.markdown("<hr style='margin: 36px 0 16px 0;'>", unsafe_allow_html=True)
 
 st.info(
-    "📌 **Thesis Context (§4.8)**: Models trained on TrashNet only; real-world photos are out-of-distribution "
-    "(see thesis §4.8: EdgeNeXt retains 38.99% of its clean accuracy on RW-TS).",
-    icon="🔬",
+    "**Thesis Context (§4.8)**: Models trained on TrashNet only; real-world photos are out-of-distribution "
+    "(see thesis §4.8: EdgeNeXt retains 38.99% of its clean accuracy on RW-TS)."
 )
 
 st.caption(

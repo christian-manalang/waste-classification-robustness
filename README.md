@@ -2,18 +2,38 @@
 
 A Streamlit-based interactive demonstration evaluating the robustness and inference latency of Convolutional Neural Networks (CNNs) and Vision Transformers under real-world visual perturbations for automated recycling systems.
 
+Official repository, interactive evaluation dashboard, and artifact archive for the undergraduate thesis:  
+**"A Comparative Study on the Robustness of Residual and Attention-Based Architectures for Waste Classification Under Degraded Conditions"**  
+*School of Information Technology, Mapúa University (October 2026)*  
+**Authors:** Nicko Gabriel A. Baldo, Jorge Christian B. Manalang, Liandro E. Refulle
+
+**Live Application:** [waste-classification-robustness.streamlit.app](https://waste-classification-robustness.streamlit.app/)
+
 ---
 
-## 📁 Project Architecture & Files
+## 🔬 Interactive & Reproducible Colab Notebooks
+
+To ensure experimental transparency and multi-seed variance validation across all seven methodological phases, the complete execution pipelines are available via view-only Google Colab links:
+
+| Execution Run | Target Seed | Description | Notebook Access |
+| :--- | :---: | :--- | :---: |
+| **1st Run (Representative)** | `Seed 42` | Primary baseline, Phase 5 retraining, Phase 6 ablation, and Phase 7 RW-TS evaluations | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1uJbjeF5og_6YRoJ6LedLHtmLDIFNF_48?usp=sharing) |
+| **2nd Run (Variance Replication 1)** | `Seed 44` | Independent model re-initialization and optimization run across identical partitions | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1RQLwQtvX5GVjXUPQ16XgJ8HML6olVGfY?usp=sharing) |
+| **3rd Run (Variance Replication 2)** | `Seed 43` | Independent model re-initialization and optimization run across identical partitions | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1XXxbjIcpSi3OGD01RQCkNPatp4C-dguR?usp=sharing) |
+
+---
+
+## Project Architecture & Files
 
 ```text
 waste-robustness-demo/
 ├── .gitignore           # Git ignore exclusions
 ├── app.py               # Streamlit wide-layout interactive robustness dashboard
-├── models.py            # Neural network architectures, CBAM wrappers, strict weight loaders
-├── degrade.py           # Preprocessing pipeline and visual degradation functions
+├── cam.py               # Lightweight Grad-CAM implementation and visualization helpers
 ├── check_weights.py     # Checkpoint verification script (strict loading & parameter counts)
+├── degrade.py           # Preprocessing pipeline and visual degradation functions
 ├── headline_test.py     # Automated batch evaluation under darkening (alpha=0.3)
+├── models.py            # Neural network architectures, CBAM wrappers, strict weight loaders
 ├── requirements.txt     # Pinned Python project dependencies (Python 3.14.4)
 ├── weights/             # Directory for trained .pth checkpoints
 │   ├── resnet50_best.pth
@@ -25,7 +45,7 @@ waste-robustness-demo/
 
 ---
 
-## ⚖️ Model Weights & Verification
+## Model Weights & Verification
 
 ### Checkpoint Placement
 Trained PyTorch checkpoints must be placed in the `weights/` directory:
@@ -36,7 +56,7 @@ Trained PyTorch checkpoints must be placed in the `weights/` directory:
 | **CBAM-ResNet50** | `weights/cbam_resnet50_best.pth` | `~26.04 M` | `4.144 GFLOPs` | Channel & Spatial Attention CNN |
 | **EdgeNeXt-Base** | `weights/edgenext_base_best.pth` | `~17.92 M` | `2.925 GFLOPs` | Hybrid ConvNeXt & Transformer |
 
-*Note: If any required checkpoint is missing for the active mode, `app.py` halts execution with `st.error()` and `st.stop()` to guarantee that evaluations only run on verified trained weights.*
+*Note: If any required checkpoint is missing for the active mode, `app.py` halts execution with a missing weight notification to guarantee that evaluations only run on verified trained weights.*
 
 ### Verifying Checkpoints
 To verify all checkpoints against the exact architectural definitions and confirm that weights load with `strict=True`:
@@ -53,17 +73,17 @@ Expected output:
 
 Evaluating Architecture: resnet50
   Checkpoint Path : weights/resnet50_best.pth
-  ✅ Status: Loaded successfully with strict=True!
+  [PASS] Status: Loaded successfully with strict=True!
   Parameters: 23.52 M (expected ~23.52 M)
 
 Evaluating Architecture: cbam_resnet50
   Checkpoint Path : weights/cbam_resnet50_best.pth
-  ✅ Status: Loaded successfully with strict=True!
+  [PASS] Status: Loaded successfully with strict=True!
   Parameters: 26.04 M (expected ~26.04 M)
 
 Evaluating Architecture: edgenext_base
   Checkpoint Path : weights/edgenext_base_best.pth
-  ✅ Status: Loaded successfully with strict=True!
+  [PASS] Status: Loaded successfully with strict=True!
   Parameters: 17.93 M (expected ~17.92 M)
 
 ====================================================================
@@ -73,7 +93,7 @@ Evaluating Architecture: edgenext_base
 
 ---
 
-## 🔬 Model Architectures (`models.py`)
+## Model Architectures (`models.py`)
 
 - **Classes**: `["cardboard", "glass", "metal", "paper", "plastic", "trash"]` (6 categories).
 - **ResNet-50**: Standard torchvision ResNet-50 with 6-class linear classification head.
@@ -88,7 +108,26 @@ Evaluating Architecture: edgenext_base
 
 ---
 
-## 🧪 Degradation Pipeline & Experiment Design
+## Visual Explainability via Grad-CAM (`cam.py`)
+
+The application integrates class activation mapping to inspect visual focus regions across clean and perturbed inputs:
+
+- **Purpose**: Diagnoses whether prediction shifts under perturbations stem from feature erasure, contrast loss, or attention drift away from the target object.
+- **Target Layer Resolution (`get_target_layer`)**:
+  - **ResNet-50**: `model.layer4[-1]` (final residual bottleneck block).
+  - **CBAM-ResNet50**: `model.layer4[-1].bottleneck.conv3` (final convolutional feature map prior to attention pooling and skip addition).
+  - **EdgeNeXt-Base**: `model.stages[-1]` (final convolutional/transformer feature extraction stage).
+- **Implementation**:
+  - Dependency-free implementation using PyTorch forward (`register_forward_hook`) and full backward (`register_full_backward_hook`) hooks.
+  - Computes global average-pooled gradients as channel importance weights, combined linearly with forward activation maps.
+  - Applies positive rectification (ReLU) and min-max normalization to `[0.0, 1.0]`.
+  - Overlays heatmaps on RGB inputs using OpenCV's JET colormap blending (`overlay_cam_on_image`) at `alpha = 0.5`.
+  - Automatic hook cleanup in `finally` blocks prevents GPU/CPU memory accumulation.
+  - Grad-CAM passes are computed strictly outside the timed inference pass to maintain latency benchmark integrity.
+
+---
+
+## Degradation Pipeline & Experiment Design
 
 ### Preprocessing (`degrade.py`)
 - Standard evaluation transform: `Resize((224, 224))`, `ToTensor()`, `Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])`.
@@ -108,7 +147,26 @@ The app isolates evaluations by **Degradation Family**:
 
 ---
 
-## ⚡ Quickstart & Verification
+## Interactive Dashboard (`app.py`)
+
+The Streamlit dashboard supports two core analytical modes:
+
+- **Single Architecture Analysis**:
+  - Side-by-side inspection of Clean input vs Degraded input.
+  - High-contrast prediction badges with confidence percentages and shift alerts when degradation flips classification.
+  - Isolated forward-pass latency measurement with warmup pass and hardware synchronization.
+  - Complete 6-class probability distribution bars.
+  - Optional Grad-CAM attention map display for both clean and degraded states.
+  - Degradation impact summary metrics (prediction stability, confidence delta, latency difference).
+
+- **Cross-Architecture Robustness Comparison ("Compare All Three")**:
+  - Simultaneous evaluation of EdgeNeXt-Base, CBAM-ResNet50, and ResNet-50 under identical degradation.
+  - Direct side-by-side display of inputs, architecture complexity benchmarks, prediction badges, latency metrics, and optional Grad-CAM heatmaps.
+  - Comparative summary table detailing parameters, FLOPs, clean top-1, degraded top-1, prediction retention status, confidence drop, and forward latency.
+
+---
+
+## Quickstart & Verification
 
 > **Environment Note:** Verified on **Python 3.14.4** with pinned package versions specified in `requirements.txt`.
 
@@ -139,10 +197,10 @@ The app isolates evaluations by **Degradation Family**:
    ```bash
    streamlit run app.py
    ```
+   Alternatively, access the hosted deployment online at [waste-classification-robustness.streamlit.app](https://waste-classification-robustness.streamlit.app/).
 
 ---
 
-## 📌 Thesis Contextual Note (§4.8)
+## Thesis Contextual Note (§4.8)
 
 > *"Models trained on TrashNet only; real-world photos are out-of-distribution (see thesis §4.8: EdgeNeXt retains 38.99% of its clean accuracy on RW-TS)."*
-
