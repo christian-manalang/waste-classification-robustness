@@ -11,7 +11,7 @@ Official repository, interactive evaluation dashboard, and artifact archive for 
 
 ---
 
-## 🔬 Interactive & Reproducible Colab Notebooks
+## Interactive & Reproducible Colab Notebooks
 
 To ensure experimental transparency and multi-seed variance validation across all seven methodological phases, the complete execution pipelines are available via view-only Google Colab links:
 
