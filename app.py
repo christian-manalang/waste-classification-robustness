@@ -502,21 +502,25 @@ if pad_to_square_toggle:
 else:
     clean_image_pil = raw_image.copy()
 
-# Apply degradations sequentially
+# Apply degradations sequentially (strictly isolated by family unless Custom)
 img_np = np.array(clean_image_pil.convert("RGB"))
 degraded_np = img_np.copy()
 
-if blur_val > 0.0:
+apply_blur = (degradation_family in ["Blur", "Custom (combined)"]) and (blur_val > 0.0)
+apply_occ = (degradation_family in ["Occlusion", "Custom (combined)"]) and (occlusion_val > 0.0)
+apply_dark = (degradation_family in ["Darkening", "Custom (combined)"]) and (brightness_alpha < 1.0)
+
+if apply_blur:
     degraded_np = apply_gaussian_blur(degraded_np, sigma=blur_val)
 
-if occlusion_val > 0.0:
+if apply_occ:
     degraded_np = apply_rectangle_occlusion(
         degraded_np,
         coverage=float(occlusion_val),
         prng=st.session_state.occlusion_seed,
     )
 
-if brightness_alpha < 1.0:
+if apply_dark:
     degraded_np = apply_brightness_darkening(degraded_np, alpha=brightness_alpha)
 
 degraded_image_pil = Image.fromarray(degraded_np)
