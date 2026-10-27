@@ -29,3 +29,6 @@ Thumbs.db
 # (Keep weights ignored if you are hosting them via GitHub Releases or HF Hub.
 # If using Git LFS, uncomment the line below or remove it so LFS can track them.)
 # weights/*.pth
+
+# Parity images that must never be committed (RW-TS photos, internet images)
+parity_local_only/

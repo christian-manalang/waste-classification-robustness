@@ -17,6 +17,20 @@ eval_transform = transforms.Compose([
 ])
 
 
+def downscale_long_side(img: Image.Image, max_side: int = 512) -> Image.Image:
+    """
+    Downscale so the long side is at most max_side px (Lanczos), keeping aspect ratio.
+    Images already within max_side are returned unchanged.
+    """
+    long_side = max(img.width, img.height)
+    if long_side <= max_side:
+        return img
+    scale = float(max_side) / long_side
+    new_w = max(1, int(round(img.width * scale)))
+    new_h = max(1, int(round(img.height * scale)))
+    return img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+
 def apply_gaussian_blur(img_np: np.ndarray, sigma: float) -> np.ndarray:
     """
     Apply Gaussian blur using sigma.

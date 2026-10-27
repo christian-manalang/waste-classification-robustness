@@ -13,34 +13,40 @@ Official repository, interactive evaluation dashboard, and artifact archive for 
 
 ## Interactive & Reproducible Colab Notebooks
 
-To ensure experimental transparency and multi-seed variance validation across all seven methodological phases, the complete execution pipelines are available via view-only Google Colab links:
+To ensure experimental transparency and multi-seed variance validation across all methodological phases, the complete execution pipelines are available via view-only Google Colab links:
 
 | Execution Run | Target Seed | Description | Notebook Access |
 | :--- | :---: | :--- | :---: |
 | **1st Run (Representative)** | `Seed 42` | Primary baseline, Phase 5 retraining, Phase 6 ablation, and Phase 7 RW-TS evaluations | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1uJbjeF5og_6YRoJ6LedLHtmLDIFNF_48?usp=sharing) |
 | **2nd Run (Variance Replication 1)** | `Seed 44` | Independent model re-initialization and optimization run across identical partitions | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1RQLwQtvX5GVjXUPQ16XgJ8HML6olVGfY?usp=sharing) |
 | **3rd Run (Variance Replication 2)** | `Seed 43` | Independent model re-initialization and optimization run across identical partitions | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1XXxbjIcpSi3OGD01RQCkNPatp4C-dguR?usp=sharing) |
+| **Post-Defense Revision** | `Seeds 42, 43, 44` | Phases 8 to 12: audit, training-change screens, calibration, one-time test evaluation | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1lkB2qseokrA--yiLdx7vl-lFFpo9ua91?usp=sharing) |
 
 ---
 
 ## Project Architecture & Files
 
 ```text
-waste-robustness-demo/
-├── .gitignore           # Git ignore exclusions
-├── app.py               # Streamlit wide-layout interactive robustness dashboard
-├── cam.py               # Lightweight Grad-CAM implementation and visualization helpers
-├── check_weights.py     # Checkpoint verification script (strict loading & parameter counts)
-├── degrade.py           # Preprocessing pipeline and visual degradation functions
-├── headline_test.py     # Automated batch evaluation under darkening (alpha=0.3)
-├── models.py            # Neural network architectures, CBAM wrappers, strict weight loaders
-├── requirements.txt     # Pinned Python project dependencies (Python 3.14.4)
-├── weights/             # Directory for trained .pth checkpoints
+waste-classification-robustness/
+├── .gitignore             # Git ignore exclusions (includes parity_local_only/)
+├── app.py                 # Streamlit wide-layout interactive robustness dashboard
+├── cam.py                 # Lightweight Grad-CAM implementation and visualization helpers
+├── check_weights.py       # Checkpoint verification (strict loading, parameter counts, SHA-256)
+├── checkpoint_hashes.json # SHA-256 and byte size of the thesis Phase 2 checkpoints (seeds 42, 43, 44)
+├── temperatures.json      # Temperature scaling constants (seed 42 used by the app)
+├── degrade.py             # Preprocessing pipeline, 512 px downscale and visual degradation functions
+├── headline_test.py       # Automated batch evaluation under darkening (alpha=0.3)
+├── models.py              # Neural network architectures, CBAM wrappers, strict weight loaders
+├── parity_check.py        # Compares the demo's outputs with the thesis notebook's outputs
+├── parity_expected.csv    # Notebook logits, predictions and confidences for the parity images
+├── parity_images/         # TrashNet test images used by parity_check.py
+├── requirements.txt       # Pinned Python project dependencies (Python 3.14.4)
+├── weights/               # Thesis Phase 2 checkpoints, seed 42 (Git LFS)
 │   ├── resnet50_best.pth
 │   ├── cbam_resnet50_best.pth
 │   └── edgenext_base_best.pth
-├── samples/             # Directory for real TrashNet test images (*.jpg, *.png)
-└── README.md            # Complete project documentation and guide
+├── samples/               # Directory for real TrashNet test images (*.jpg, *.png)
+└── README.md              # Complete project documentation and guide
 ```
 
 ---
@@ -59,7 +65,7 @@ Trained PyTorch checkpoints must be placed in the `weights/` directory:
 *Note: If any required checkpoint is missing for the active mode, `app.py` halts execution with a missing weight notification to guarantee that evaluations only run on verified trained weights.*
 
 ### Verifying Checkpoints
-To verify all checkpoints against the exact architectural definitions and confirm that weights load with `strict=True`:
+To verify all checkpoints against the exact architectural definitions, confirm that weights load with `strict=True`, and confirm that each file is the exact checkpoint reported in the thesis (SHA-256):
 
 ```bash
 python check_weights.py
@@ -86,10 +92,46 @@ Evaluating Architecture: edgenext_base
   [PASS] Status: Loaded successfully with strict=True!
   Parameters: 17.93 M (expected ~17.92 M)
 
+--------------------------------------------------------------------
+  SHA-256 Verification (against checkpoint_hashes.json)
+--------------------------------------------------------------------
+  resnet50        [PASS] sha256 d401280f  ->  seed42
+  cbam_resnet50   [PASS] sha256 ed7ac1b6  ->  seed42
+  edgenext_base   [PASS] sha256 09e54ab2  ->  seed42
+  [PASS] all checkpoints match seed42
+
 ====================================================================
   All model checkpoints loaded and verified successfully.
 ====================================================================
 ```
+
+---
+
+## Thesis Weights, Calibration & Parity
+
+### Thesis checkpoints and SHA-256 verification
+`weights/` holds the thesis Phase 2 checkpoints for seed 42 (stored with Git LFS). `checkpoint_hashes.json` lists the SHA-256 hash and byte size of the Phase 2 checkpoints for seeds 42, 43 and 44. `check_weights.py` hashes each file in `weights/`, prints the first 8 hex characters and the seed it matches (`seed42`, `seed43`, `seed44` or `NO MATCH`), and exits non-zero if any file has no match or the three models do not all match the same seed. The app runs the same check once at startup and shows the verified hashes under the title, or a warning if verification fails.
+
+### Calibrated confidence (`temperatures.json`)
+`temperatures.json` holds one temperature scaling constant per model; the app uses the seed 42 values under `"temperature"` (`"all_seeds"` is for reference only). Calibrated probabilities are `softmax(logits / T)`. This changes how confident a model is, never which class it predicts. The constants were fitted on 88 internet photos (Wild-Dev). The sidebar checkbox *Show calibrated confidence (temperature scaling)* is on by default; turning it off shows the raw softmax. The in-app expander *About calibrated confidence* summarizes the thesis results (Section 4.11.2).
+
+### Parity check (`parity_check.py`)
+`parity_check.py` confirms that the demo reproduces the thesis notebook. For each row of `parity_expected.csv` it loads the image (from `parity_images/`, then `parity_local_only/`; missing images are reported as `SKIPPED`) and runs two paths with the app's own model loader, `eval_transform`, temperatures and downscale function:
+
+- **Notebook path**: the original image resized directly to 224x224. The predicted class must match, every logit must be within `1e-3` (CPU) or `1e-2` (GPU), and raw and calibrated confidence within `1e-3`.
+- **App path**: the 512 px downscale followed by the same transform, exactly as in `app.py`. TrashNet images (at most 512 px) must match exactly; for larger photos a difference is reported as `DRIFT`, together with whether the predicted class flipped.
+
+```bash
+python parity_check.py
+```
+
+The script exits non-zero only on a `FAIL`. With only the committed `parity_images/`, the RW-TS and internet rows are reported as `SKIPPED`.
+
+### Why images are downscaled to 512 px
+TrashNet images are stored at 512 px or less on the long side, and the thesis applied blur and occlusion at that stored resolution before the 224x224 resize. The app therefore downscales every image to a 512 px long side (Lanczos, `degrade.downscale_long_side`) before degradation and inference, so that a given blur sigma or occlusion coverage has the same strength as in the thesis. This step is deliberate. For photos larger than 512 px, predictions can differ slightly from the thesis notebook, which resizes from the full-resolution image; `parity_check.py` reports this as `DRIFT`.
+
+### Images that are never committed
+`parity_local_only/` (RW-TS photos and internet images) and any other internet images are kept locally only and are never committed; the folder is listed in `.gitignore`. Only the TrashNet images in `parity_images/` are part of the repository.
 
 ---
 
@@ -132,7 +174,7 @@ The application integrates class activation mapping to inspect visual focus regi
 ### Preprocessing (`degrade.py`)
 - Standard evaluation transform: `Resize((224, 224))`, `ToTensor()`, `Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])`.
 - Non-square input handling: `pad_to_square` centers images with white padding `(255, 255, 255)` to a 1:1 aspect ratio prior to evaluation (disabled by default).
-- Upload downscaling: Uploaded images with a long side $> 512\text{ px}$ are resized proportionally so the max dimension is $512\text{ px}$, maintaining consistent degradation intensity with the thesis test set.
+- Downscaling (`downscale_long_side`): Images with a long side $> 512\text{ px}$ are resized proportionally (Lanczos) so the max dimension is $512\text{ px}$, maintaining consistent degradation intensity with the thesis test set (see *Why images are downscaled to 512 px*).
 
 ### Degradation Families & Presets
 The app isolates evaluations by **Degradation Family**:
@@ -153,7 +195,7 @@ The Streamlit dashboard supports two core analytical modes:
 
 - **Single Architecture Analysis**:
   - Side-by-side inspection of Clean input vs Degraded input.
-  - High-contrast prediction badges with confidence percentages and shift alerts when degradation flips classification.
+  - High-contrast prediction badges with confidence percentages (calibrated with the raw value alongside, or raw only) and shift alerts when degradation flips classification.
   - Isolated forward-pass latency measurement with warmup pass and hardware synchronization.
   - Complete 6-class probability distribution bars.
   - Optional Grad-CAM attention map display for both clean and degraded states.
@@ -180,6 +222,11 @@ The Streamlit dashboard supports two core analytical modes:
    python check_weights.py
    ```
 
+   Then confirm parity with the thesis notebook:
+   ```bash
+   python parity_check.py
+   ```
+
 3. **Run Automated Batch Benchmark (`headline_test.py`)**:
    Evaluates all three architectures side-by-side across samples under clean vs severe darkening ($\alpha = 0.30$):
    ```bash
@@ -201,6 +248,6 @@ The Streamlit dashboard supports two core analytical modes:
 
 ---
 
-## Thesis Contextual Note (§4.8)
+## Thesis Contextual Note (Section 4.8)
 
-> *"Models trained on TrashNet only; real-world photos are out-of-distribution (see thesis §4.8: EdgeNeXt retains 38.99% of its clean accuracy on RW-TS)."*
+> Models trained on TrashNet only; real-world photos are out-of-distribution. Thesis Section 4.8: EdgeNeXt-Base retained 38.99% of its clean accuracy on RW-TS (Seed 42); across three seeds, clean RW-TS accuracy was 36.51% (EdgeNeXt-Base), 23.72% (ResNet-50) and 19.22% (CBAM-ResNet50), against 94.91%, 93.77% and 91.40% on the clean TrashNet test set.

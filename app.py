@@ -1,4 +1,5 @@
 import glob
+import json
 import os
 import random
 import time
@@ -16,8 +17,10 @@ from degrade import (
     apply_rectangle_occlusion,
     apply_brightness_darkening,
     pad_to_square,
+    downscale_long_side,
 )
 from cam import GradCAM, overlay_cam_on_image, get_target_layer
+from check_weights import verify_hashes
 
 
 # -----------------------------------------------------------------------------
@@ -82,6 +85,29 @@ def get_model(arch_key: str, ckpt_path: str) -> Tuple[torch.nn.Module, torch.dev
     return model, device
 
 
+@st.cache_resource(show_spinner=False)
+def get_weight_verification() -> Tuple[bool, Optional[str], Dict[str, Dict[str, Any]], str]:
+    """Hash the three checkpoints once and compare with checkpoint_hashes.json."""
+    try:
+        return verify_hashes()
+    except Exception as e:
+        return False, None, {}, f"verification error: {e}"
+
+
+TEMPERATURES_PATH = "temperatures.json"
+
+
+@st.cache_resource(show_spinner=False)
+def get_temperatures() -> Optional[Dict[str, float]]:
+    """Load the seed-42 temperature scaling constants once; None if unavailable."""
+    try:
+        with open(TEMPERATURES_PATH, "r", encoding="utf-8") as f:
+            temps = json.load(f)["temperature"]
+        return {arch: float(temps[arch]) for arch in ("resnet50", "cbam_resnet50", "edgenext_base")}
+    except Exception:
+        return None
+
+
 # Warmup cache in session state
 if "warmed_up_models" not in st.session_state:
     st.session_state.warmed_up_models = set()
@@ -92,11 +118,15 @@ def run_inference(
     device: torch.device,
     pil_image: Image.Image,
     model_name: str,
+    temperature: Optional[float] = None,
+    use_calibrated: bool = False,
 ) -> Dict[str, Any]:
     """
     Execute forward pass with precise latency measurement.
     Warms up once per model (tracked in session state) and times only the raw forward pass.
     Softmax and CPU conversions occur strictly AFTER the timer stops.
+    Returns raw logits, raw softmax probs and temperature-scaled probs (softmax(logits / T)).
+    "probs" / "top_prob" hold whichever of the two is displayed.
     """
     tensor = eval_transform(pil_image).unsqueeze(0).to(device)
 
@@ -122,11 +152,22 @@ def run_inference(
     probs = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
     top_idx = int(np.argmax(probs))
 
+    # Temperature scaling changes confidence only; argmax (top_idx) is unchanged
+    if temperature is not None:
+        probs_cal = torch.softmax(logits / temperature, dim=1).squeeze(0).cpu().numpy()
+    else:
+        probs_cal = probs
+    shown = probs_cal if (use_calibrated and temperature is not None) else probs
+
     return {
-        "probs": probs,
+        "logits": logits.squeeze(0).cpu().numpy(),
+        "probs_raw": probs,
+        "probs_cal": probs_cal,
+        "probs": shown,
         "top_idx": top_idx,
         "top_class": CLASSES[top_idx],
-        "top_prob": float(probs[top_idx]),
+        "top_prob": float(shown[top_idx]),
+        "top_prob_raw": float(probs[top_idx]),
         "latency_ms": latency_ms,
     }
 
@@ -136,11 +177,14 @@ def render_prediction_badge(
     top_prob: float,
     is_degraded: bool = False,
     baseline_class: Optional[str] = None,
+    raw_prob: Optional[float] = None,
 ) -> None:
     """
     Render high-contrast styled top prediction badge with class name and confidence.
+    If raw_prob is given (calibrated mode), the raw softmax confidence is shown alongside.
     """
     pct = top_prob * 100.0
+    raw_note = f" <span style=\"font-size: 0.9rem; font-weight: 400; opacity: 0.85;\">(raw {raw_prob * 100.0:.1f}%)</span>" if raw_prob is not None else ""
 
     if is_degraded and baseline_class is not None and top_class != baseline_class:
         st.markdown(
@@ -152,7 +196,7 @@ def render_prediction_badge(
                     Prediction Shifted Under Degradation
                 </div>
                 <div style="font-size: 1.35rem; font-weight: 700; margin-top: 2px;">
-                    {top_class.upper()} ({pct:.1f}%)
+                    {top_class.upper()} ({pct:.1f}%){raw_note}
                 </div>
                 <div style="font-size: 0.85rem; opacity: 0.92; margin-top: 4px;">
                     Baseline clean was: <b>{baseline_class.upper()}</b>
@@ -177,7 +221,7 @@ def render_prediction_badge(
                     {subtitle}
                 </div>
                 <div style="font-size: 1.35rem; font-weight: 700; margin-top: 2px;">
-                    {top_class.upper()} ({pct:.1f}%)
+                    {top_class.upper()} ({pct:.1f}%){raw_note}
                 </div>
             </div>
             """,
@@ -214,6 +258,19 @@ def render_probability_bars(probs: np.ndarray, top_idx: int) -> None:
 # Main Application Header
 # -----------------------------------------------------------------------------
 st.title("Visual Degradation Robustness in Waste Classification")
+
+weights_ok, weights_seed, weights_hashes, weights_msg = get_weight_verification()
+if weights_ok and weights_seed == "seed42":
+    short_hashes = " / ".join(
+        weights_hashes[arch]["sha256"][:8] for arch in ("resnet50", "cbam_resnet50", "edgenext_base")
+    )
+    st.caption(f"Weights: thesis Phase 2 checkpoints, seed 42 (SHA-256 verified: {short_hashes})")
+elif weights_ok:
+    st.warning(
+        f"Weight verification: checkpoints match {weights_seed}, not the seed 42 checkpoints reported in the thesis."
+    )
+else:
+    st.warning(f"Weight verification failed ({weights_msg}). Results may not reflect the thesis checkpoints.")
 st.markdown(
     "Evaluating neural network robustness and inference latency under real-world visual perturbations "
     "(sensor blur, occlusions, and severe illumination changes) for automated recycling sorting systems."
@@ -339,13 +396,8 @@ else:
 # Downscale uploaded images if long side exceeds 512 px
 was_downscaled = False
 if raw_image is not None:
-    max_side = max(raw_image.width, raw_image.height)
-    if max_side > 512:
-        scale = 512.0 / max_side
-        new_w = max(1, int(round(raw_image.width * scale)))
-        new_h = max(1, int(round(raw_image.height * scale)))
-        raw_image = raw_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        was_downscaled = True
+    was_downscaled = max(raw_image.width, raw_image.height) > 512
+    raw_image = downscale_long_side(raw_image, max_side=512)
 
 # 3. Preprocessing Toggle (Default: False)
 st.sidebar.markdown("---")
@@ -360,6 +412,17 @@ show_cam = st.sidebar.checkbox(
     value=False,
     help="Superimpose class activation heatmaps to highlight visual focus regions",
 )
+
+temperatures = get_temperatures()
+use_calibrated = st.sidebar.checkbox(
+    "Show calibrated confidence (temperature scaling)",
+    value=temperatures is not None,
+    disabled=temperatures is None,
+    help="Divide each model's logits by its fitted temperature before softmax. The predicted class does not change.",
+)
+if temperatures is None:
+    st.sidebar.warning(f"`{TEMPERATURES_PATH}` not found or invalid: showing raw softmax confidence only.")
+    use_calibrated = False
 
 
 # 4. Perturbation Settings & Degradation Families
@@ -494,7 +557,11 @@ if raw_image is None:
     st.stop()
 
 if was_downscaled:
-    st.info("Image downscaled to 512 px (long side) so degradation strength matches the thesis test set.")
+    st.info(
+        "Image downscaled to 512 px (long side) so degradation strength matches the thesis test set. "
+        "Predictions on large photos can differ slightly from the thesis notebook, which resizes from the "
+        "full-resolution image."
+    )
 
 # Apply pad-to-square if enabled
 if pad_to_square_toggle:
@@ -536,8 +603,15 @@ if model_choice != "Compare All Three":
     model, device = get_model(selected_cfg["arch"], selected_cfg["ckpt_path"])
 
     # Run inferences with warmup tracking and timer around raw forward pass
-    clean_res = run_inference(model, device, clean_image_pil, model_name=model_choice)
-    degraded_res = run_inference(model, device, degraded_image_pil, model_name=model_choice)
+    temperature = temperatures.get(selected_cfg["arch"]) if temperatures else None
+    clean_res = run_inference(
+        model, device, clean_image_pil, model_name=model_choice,
+        temperature=temperature, use_calibrated=use_calibrated,
+    )
+    degraded_res = run_inference(
+        model, device, degraded_image_pil, model_name=model_choice,
+        temperature=temperature, use_calibrated=use_calibrated,
+    )
 
     # Optional Grad-CAM overlays (computed strictly outside the timed inference pass)
     clean_cam_overlay: Optional[Image.Image] = None
@@ -571,6 +645,7 @@ if model_choice != "Compare All Three":
             top_class=clean_res["top_class"],
             top_prob=clean_res["top_prob"],
             is_degraded=False,
+            raw_prob=clean_res["top_prob_raw"] if use_calibrated else None,
         )
         st.markdown(
             f"""
@@ -603,6 +678,7 @@ if model_choice != "Compare All Three":
             top_prob=degraded_res["top_prob"],
             is_degraded=True,
             baseline_class=clean_res["top_class"],
+            raw_prob=degraded_res["top_prob_raw"] if use_calibrated else None,
         )
         st.markdown(
             f"""
@@ -680,8 +756,15 @@ else:
     results: Dict[str, Dict[str, Any]] = {}
     for name, cfg in MODEL_CONFIGS.items():
         m, dev = get_model(cfg["arch"], cfg["ckpt_path"])
-        clean_out = run_inference(m, dev, clean_image_pil, model_name=name)
-        deg_out = run_inference(m, dev, degraded_image_pil, model_name=name)
+        temperature = temperatures.get(cfg["arch"]) if temperatures else None
+        clean_out = run_inference(
+            m, dev, clean_image_pil, model_name=name,
+            temperature=temperature, use_calibrated=use_calibrated,
+        )
+        deg_out = run_inference(
+            m, dev, degraded_image_pil, model_name=name,
+            temperature=temperature, use_calibrated=use_calibrated,
+        )
 
         cam_overlay: Optional[Image.Image] = None
         if show_cam:
@@ -771,6 +854,28 @@ else:
         )
 
     st.dataframe(summary_rows, use_container_width=True, hide_index=True)
+    st.caption(
+        "Confidence shown: calibrated (temperature scaling)." if use_calibrated
+        else "Confidence shown: raw softmax."
+    )
+
+# -----------------------------------------------------------------------------
+# About Calibrated Confidence
+# -----------------------------------------------------------------------------
+with st.expander("About calibrated confidence", expanded=False):
+    st.markdown(
+        "Temperature scaling divides a model's output scores (logits) by one fitted constant per model "
+        "before the softmax. It changes how confident a model is, not which class it picks. "
+        "The constants were fitted on 88 internet images (Wild-Dev), so on a new image the calibrated "
+        "confidence is more honest than raw softmax but still not a guarantee.\n\n"
+        "In the thesis (Section 4.11.2, Table 22), for ResNet-50 and CBAM-ResNet50 the share of wrong "
+        "predictions made with at least 90% confidence fell from 33.9% and 37.0% on the real-world RW-TS set "
+        "(35.1% and 34.7% on Wild-Test) to 0% on both real-world test sets, and expected calibration error on "
+        "RW-TS fell by 80.4% (0.5362 to 0.1053) and 82.0% (0.5995 to 0.1079), mean of three seeds. "
+        "The predictions themselves do not change; the model stops being that sure of them.\n\n"
+        "The constants were fitted on internet photos, so on clean TrashNet images calibrated confidence will "
+        "look lower than the raw value. This is expected: those images are the ones the models were trained on."
+    )
 
 # -----------------------------------------------------------------------------
 # Footer: Thesis Chapter 4 Contextual Note
@@ -778,11 +883,8 @@ else:
 st.markdown("<hr style='margin: 36px 0 16px 0;'>", unsafe_allow_html=True)
 
 st.info(
-    "**Thesis Context (§4.8)**: Models trained on TrashNet only; real-world photos are out-of-distribution "
-    "(see thesis §4.8: EdgeNeXt retains 38.99% of its clean accuracy on RW-TS)."
-)
-
-st.caption(
-    "Models trained on TrashNet only; real-world photos are out-of-distribution "
-    "(see thesis §4.8: EdgeNeXt retains 38.99% of its clean accuracy on RW-TS)."
+    "Models trained on TrashNet only; real-world photos are out-of-distribution. "
+    "Thesis Section 4.8: EdgeNeXt-Base retained 38.99% of its clean accuracy on RW-TS (Seed 42); "
+    "across three seeds, clean RW-TS accuracy was 36.51% (EdgeNeXt-Base), 23.72% (ResNet-50) and "
+    "19.22% (CBAM-ResNet50), against 94.91%, 93.77% and 91.40% on the clean TrashNet test set."
 )
